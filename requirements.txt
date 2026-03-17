@@ -1,0 +1,15 @@
+streamlit==1.44.1
+rasterio==1.4.3
+numpy==2.2.4
+pandas
+matplotlib==3.10.1
+geopandas
+shapely
+gspread
+oauth2client
+plotly
+fpdf
+folium
+streamlit-folium
+streamlit-option-menu
+matplotlib-inline==0.1.7
