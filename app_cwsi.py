@@ -7,7 +7,6 @@ from rasterio.io import MemoryFile
 from rasterio.warp import reproject
 from rasterio.enums import Resampling as RRes
 from rasterio.features import rasterize
-from shapely.geometry import mapping
 from shapely.validation import make_valid
 import geopandas as gpd
 import datetime
@@ -20,7 +19,6 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from streamlit_option_menu import option_menu
 import plotly.express as px
-import plotly.graph_objects as go
 
 # =====================================================
 # CONFIGURACIÓN DE PÁGINA
@@ -478,7 +476,6 @@ class AppModules:
     def render_header():
         escudo = AuthManager.get_img_as_base64("assets/Escudo.png")
         logo_tyc = AuthManager.get_img_as_base64("assets/logo_TyC.png")
-        rice_plant = AuthManager.get_img_as_base64("assets/rice_plant_logo.png")
         
         # Header centrado con 3 elementos: Escudo - Título - TyC
         st.markdown(f"""
@@ -498,28 +495,29 @@ class AppModules:
 
     @staticmethod
     def home_page():
-        drone_img = AuthManager.get_img_as_base64("assets/drone_rice_monitoring.png")
         st.markdown('<div class="animate-fade-in">', unsafe_allow_html=True)
-        
-        # Hero Section con Diseño Asimétrico
-        st.markdown(f"""
-            <div class="glass-card" style="padding: 0; overflow: hidden; display: flex; flex-direction: row; flex-wrap: wrap; align-items: stretch; min-height: 480px; border: 1px solid rgba(255,255,255,0.5);">
-                <div style="flex: 1; padding: 60px 40px; display: flex; flex-direction: column; justify-content: center; min-width: 300px;">
+
+        # Hero Section con diseño CSS puro (sin imagen externa)
+        st.markdown("""
+            <div class="glass-card" style="padding: 0; overflow: hidden; display: flex; flex-direction: row; flex-wrap: wrap; align-items: stretch; min-height: 400px; border: 1px solid rgba(255,255,255,0.5);">
+                <div style="flex: 1; padding: 60px 50px; display: flex; flex-direction: column; justify-content: center; min-width: 300px;">
                     <div style="margin-bottom: 20px;">
                         <span style="background: rgba(106, 153, 78, 0.15); color: var(--color-green); padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 0.8rem; letter-spacing: 1px; text-transform: uppercase;">Cloud Platform v2.0</span>
                     </div>
                     <h2 style="font-size: 3rem; color: var(--color-dark-blue); font-weight: 800; line-height: 1.1; margin-bottom: 20px;">
                         Agricultura de <br><span style="background: linear-gradient(120deg, var(--color-teal), var(--color-green)); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Precisión</span>
                     </h2>
-                    <p style="font-size: 1.1rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 30px;">
+                    <p style="font-size: 1.1rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 10px;">
                         StressRice integra teledetección térmica y modelamiento avanzado para optimizar la gestión hídrica del cultivo de arroz en la costa norte del Perú.
                     </p>
-                    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
-                        <button class="css-button" style="background: var(--color-dark-blue); color: white; border: none; padding: 12px 25px; border-radius: 10px; font-weight: 600; cursor: pointer;" onclick="window.location.reload()">Comenzar</button>
-                    </div>
                 </div>
-                <div style="flex: 1.2; min-width: 300px; background-image: url('data:image/png;base64,{drone_img}'); background-size: cover; background-position: center; position: relative;">
-                     <div style="position: absolute; inset: 0; background: linear-gradient(90deg, #ffffff 0%, rgba(255,255,255,0) 25%);"></div>
+                <div style="flex: 1; min-width: 280px; background: linear-gradient(135deg, var(--color-dark-blue) 0%, var(--color-teal) 50%, var(--color-green) 100%); display: flex; align-items: center; justify-content: center; padding: 40px; position: relative; overflow: hidden;">
+                    <div style="position: absolute; inset: 0; background: radial-gradient(circle at 30% 50%, rgba(255,255,255,0.08) 0%, transparent 60%);"></div>
+                    <div style="text-align: center; z-index: 1;">
+                        <div style="font-size: 5rem; margin-bottom: 15px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3));">🌾</div>
+                        <p style="color: rgba(255,255,255,0.9); font-size: 1.1rem; font-weight: 600; margin: 0;">Monitoreo con Drones</p>
+                        <p style="color: rgba(255,255,255,0.7); font-size: 0.9rem; margin-top: 6px;">Imágenes Térmicas &amp; Multiespectrales</p>
+                    </div>
                 </div>
             </div>
         """, unsafe_allow_html=True)
@@ -805,11 +803,15 @@ class AppModules:
                     def load_gdf(files):
                         temp = tempfile.mkdtemp()
                         shp = None
+                        gpkg = None
                         for f in files:
                             path = os.path.join(temp, f.name)
                             with open(path, "wb") as w: w.write(f.getbuffer())
                             if f.name.endswith(".shp"): shp = path
-                        return gpd.read_file(shp) if shp else None
+                            elif f.name.endswith(".gpkg"): gpkg = path
+                        if shp: return gpd.read_file(shp)
+                        if gpkg: return gpd.read_file(gpkg)
+                        return None
 
                     gdf = load_gdf(copas_files)
                     if gdf is None: st.error("Error leyendo Shapefile"); return
@@ -841,24 +843,29 @@ class AppModules:
                     
                     progress = st.progress(0)
                     total_poly = len(gdf)
-                    
-                    for idx, row in gdf.iterrows():
+
+                    for i, (idx, row) in enumerate(gdf.iterrows()):
                         geom = row.geometry
+                        if not geom or geom.is_empty:
+                            continue
+                        geom = make_valid(geom)
                         # Rasterize single polygon
                         m_poly = rasterize([(geom, 1)], out_shape=(h, w), transform=transform, fill=0, dtype="uint8").astype(bool)
-                        
+
                         vals = cwsi[m_poly & mask]
                         vals = vals[np.isfinite(vals)]
-                        
+
                         if vals.size > 0:
+                            pid = row[id_field] if id_field in row.index else idx
                             records.append({
-                                id_field: row[id_field],
-                                "CWSI_mean": np.mean(vals),
-                                "CWSI_min": np.min(vals),
-                                "CWSI_max": np.max(vals),
-                                "Area_px": vals.size
+                                id_field: pid,
+                                "CWSI_mean": round(float(np.mean(vals)), 4),
+                                "CWSI_min": round(float(np.min(vals)), 4),
+                                "CWSI_max": round(float(np.max(vals)), 4),
+                                "Area_px": int(vals.size)
                             })
-                        if idx % 10 == 0: progress.progress(min(1.0, idx/total_poly))
+                        if total_poly > 0 and i % max(1, total_poly // 20) == 0:
+                            progress.progress(min(1.0, (i + 1) / total_poly))
                     
                     progress.empty()
 
@@ -1027,7 +1034,7 @@ def main():
         st.markdown("""
             <div class="footer">
                 <p><b>Financiamiento:</b> Proyecto EcosmartRice (Contrato PE501086540-2024-PROCIENCIA) - CONCYTEC</p>
-                <p>© 2025 Universidad Nacional Agraria La Molina | Powered by StressRice</p>
+                <p>© 2025-2026 Universidad Nacional Agraria La Molina | Powered by StressRice v2.0</p>
             </div>
         """, unsafe_allow_html=True)
 
